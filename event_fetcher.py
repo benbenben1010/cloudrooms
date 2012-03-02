@@ -18,12 +18,12 @@ class CalendarParser:
     self.domain = config.get('DEFAULT', 'domain')
     self.realm = config.get('DEFAULT', 'realm')
     self.outfile = config.get('DEFAULT', 'outfile')
-    os.remove(self.outfile)
+    if os.path.exists(self.outfile):
+      os.remove(self.outfile)
     self.fd = open(self.outfile, 'w')
 
   def close_file(self):
     self.fd.close()
-
 
   def get_event_set(self, username, start_index):
     username = username + self.domain
