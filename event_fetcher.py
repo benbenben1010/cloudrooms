@@ -24,12 +24,17 @@ class CalendarParser:
       os.remove(self.outfile)
     self.fd = open(self.outfile, 'w')
 
-    self.logger = logging.getLogger(__name__)
+    self.setup_logging(config.get('DEFAULT', 'logfile'))
+
+  def setup_logging(self, logfile):
+    logging.basicConfig(filename=logfile, level=logging.DEBUG, 
+        format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
+    self.logger = logging.getLogger("CaloendarParser")
 
   def close_file(self):
     self.fd.close()
 
-  def get_event_set(self, username, start_index):
+  def get_event_batch(self, username, start_index):
     username = username + self.domain
     auth = urllib2.HTTPDigestAuthHandler()
     auth.add_password(realm=self.realm,
@@ -51,14 +56,6 @@ class CalendarParser:
 
   def get_and_print_event(self, username, event_id):
     username = username + self.domain
-    # auth = urllib2.HTTPDigestAuthHandler()
-    # auth.add_password(realm=self.realm,
-    #                   uri=self.uri_base,
-    #                   user=username,
-    #                   passwd=self.cal_passwd)
-    # opener = urllib2.build_opener(auth)
-    # urllib2.install_opener(opener)
-
 
     uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
     print 'fetching: ', uri
@@ -144,53 +141,43 @@ class CalendarParser:
 
   def parse_events(self):
     for user in self.usernames:
-      i = 0
-      now_event = None
-      next_event = None
+      event_index = 0
+      current_event = None
+      following_event = None
       logging.info("Fetching records for %s" % user)
-      while i < 700: 
-        logging.debug("Fetching records %d - %d" % (i, i + 50))
-        events = self.get_event_set(user, i)
+      while event_index < 700: 
+        logging.debug("Fetching records %d - %d" % (event_index + 1, event_index + 50))
+        events = self.get_event_batch(user, event_index)
         (now, next) = self.get_next_event(events)
         if now:
-          now_event = now
-        if next and not next_event:
-          next_event = next
-        elif next and int(next['start']) < int(next_event['start']):
-          next_event = next
-        i += 50
+          current_event = now
+        if next and not following_event:
+          following_event = next
+        elif next and int(next['start']) < int(following_event['start']):
+          following_event = next
+        event_index += 50
       self.record_info("Room: %s" % user)
-      if now_event:
-        self.record_info("Current meeting: %s" % self.display_event(now_event, user))
-        # print "cur %s" % cal.display_event(now_event, user)
+      if current_event:
+        self.record_info("Current meeting: %s" % self.display_event(current_event, user))
       else:
         self.record_info("Current meeting: AVAILABLE")
-        # print 'no cur event'
-      if next_event:
-        self.record_info("Next meeting: %s" % self.display_event(next_event, user))
-        # print "next %s" % cal.display_event(next_event, user)
+      if following_event:
+        self.record_info("Next meeting: %s" % self.display_event(following_event, user))
       else:
         self.record_info("No Future meetings")
-        # print 'no next event...?'
       self.record_info("----------------------")
-      # print '----------------------'
-      # print json.dumps(next_event, sort_keys=True, indent=4)
-      # print "Now is: %s" % time.strftime("%a, %d %b %Y %I:%M:%S ", get_now())
     self.close_file()
 
 
 def parse_args():
   parser = argparse.ArgumentParser(description='Fetch calendar events')
-  parser.add_argument('-c', '--config', dest='config', default='test.ini', 
-                      help='Config file to use')
+  parser.add_argument('-c', '--config', dest='config', required=True, 
+                      default='test.ini', help='Config file to use')
   return parser.parse_args()
 
 def main():
   args = parse_args()
   cal = CalendarParser(args.config)
-  logging.basicConfig(filename='example.log', level=logging.DEBUG)
-  logging.basicConfig(format='%(asctime)s %(message)s', 
-                      datefmt='%m/%d/%Y %I:%M:%S %p')
   cal.parse_events()
 
 # print json.dumps(output, sort_keys=True, indent=4)
