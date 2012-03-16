@@ -9,6 +9,13 @@ import os
 import argparse
 import logging
 
+class Meeting:
+  def __init__(self, event_data):
+    self.title = None
+    self.next_start_time = None
+    self.next_end_time = None
+    self.duration = None
+
 
 class CalendarParser:
   def __init__(self, config_file):
@@ -29,7 +36,7 @@ class CalendarParser:
   def setup_logging(self, logfile):
     logging.basicConfig(filename=logfile, level=logging.DEBUG, 
         format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
-    self.logger = logging.getLogger("CaloendarParser")
+    self.logger = logging.getLogger("CalendarParser")
 
   def close_file(self):
     self.fd.close()
@@ -67,14 +74,14 @@ class CalendarParser:
     output = json.loads(ret)
     print json.dumps(output, sort_keys=True, indent=4)
   
-  def get_now(self):
+  def get_current_time(self):
     now_secs = time.time()
     now_time = time.localtime(now_secs)
     return int(time.time())
   
   def get_next_event(self, events):
     events = json.loads(events)
-    cur_time = self.get_now()
+    cur_time = self.get_current_time()
     time_till_next_event = 99999999
     now_event = None
     next_event = None
@@ -84,8 +91,11 @@ class CalendarParser:
         event = self.find_next_occurrence_of(event, cur_time)
         # print self.display_event(event, "test")
         # self.get_and_print_event('starwars', event['metadata']['id'])
-      start_of_this_event = event['start']
-      end_of_this_event = event['end']
+      try:
+        start_of_this_event = int(event['start'])
+        end_of_this_event = int(event['end'])
+      except ValueError, e:
+        continue 
       if not now_event and self.event_is_happening_now(cur_time, start_of_this_event, end_of_this_event):
         now_event = event
       time_till_start_of_this_event = start_of_this_event - cur_time
@@ -139,23 +149,36 @@ class CalendarParser:
   def record_info(self, string):
     self.fd.write('%s\n' % string)
 
+  def find_next_batch_index(self, events):
+    import re
+    events = json.loads(events)
+    if not events['metadata']['links'].has_key('next'):
+      return -1
+    url = events['metadata']['links']['next'][0]['href']
+    match = re.search(r'start=(\d+)', url)
+    if match:
+      return int(match.group(1)) or -1
+    else:
+      return -1
+
   def parse_events(self):
     for user in self.usernames:
       event_index = 0
       current_event = None
       following_event = None
       logging.info("Fetching records for %s" % user)
-      while event_index < 700: 
+      while event_index >= 0:
         logging.debug("Fetching records %d - %d" % (event_index + 1, event_index + 50))
         events = self.get_event_batch(user, event_index)
-        (now, next) = self.get_next_event(events)
-        if now:
-          current_event = now
-        if next and not following_event:
-          following_event = next
-        elif next and int(next['start']) < int(following_event['start']):
-          following_event = next
-        event_index += 50
+        (happening_now, happening_next) = self.get_next_event(events)
+        if happening_now:
+          current_event = happening_now
+        if happening_next and not following_event:
+          following_event = happening_next
+        elif happening_next and int(happening_next['start']) < int(following_event['start']):
+          following_event = happening_next
+        event_index = self.find_next_batch_index(events)
+
       self.record_info("Room: %s" % user)
       if current_event:
         self.record_info("Current meeting: %s" % self.display_event(current_event, user))
