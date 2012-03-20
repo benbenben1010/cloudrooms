@@ -1,21 +1,15 @@
 #!/usr/bin/python2
 
-import urllib2
+import argparse
+import ConfigParser
+import logging
+import os
+import re
 import simplejson as json
 import string
+import sys
 import time
-import ConfigParser
-import os
-import argparse
-import logging
-
-class Meeting:
-  def __init__(self, event_data):
-    self.title = None
-    self.next_start_time = None
-    self.next_end_time = None
-    self.duration = None
-
+import urllib2
 
 class CalendarParser:
   def __init__(self, config_file):
@@ -38,7 +32,7 @@ class CalendarParser:
         format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
     self.logger = logging.getLogger("CalendarParser")
 
-  def close_file(self):
+  def cleanup(self):
     self.fd.close()
 
   def get_event_batch(self, username, start_index):
@@ -56,41 +50,23 @@ class CalendarParser:
     req = urllib2.Request(uri)
     req.add_header('Accept', 'application/json')
     
-    ret = urllib2.urlopen(req).read()
-    # output = json.loads(ret)
-    # print json.dumps(output, sort_keys=True, indent=4)
-    return ret
+    data = urllib2.urlopen(req).read()
+    event_batch = json.loads(data)['events']
+    event_index = self.find_next_batch_index(json.loads(data))
+    return (event_batch, event_index)
 
-  def get_and_print_event(self, username, event_id):
-    username = username + self.domain
-
-    uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
-    print 'fetching: ', uri
-
-    req = urllib2.Request(uri)
-    req.add_header('Accept', 'application/json')
-
-    ret = urllib2.urlopen(req).read()
-    output = json.loads(ret)
-    print json.dumps(output, sort_keys=True, indent=4)
-  
   def get_current_time(self):
-    now_secs = time.time()
-    now_time = time.localtime(now_secs)
     return int(time.time())
   
-  def get_next_event(self, events):
-    events = json.loads(events)
+  def find_next_events_in_batch(self, events):
     cur_time = self.get_current_time()
-    time_till_next_event = 99999999
+    time_till_next_event = sys.maxint
     now_event = None
     next_event = None
   
-    for event in events['events']:
+    for event in events:
       if event['recurrence']:
         event = self.find_next_occurrence_of(event, cur_time)
-        # print self.display_event(event, "test")
-        # self.get_and_print_event('starwars', event['metadata']['id'])
       try:
         start_of_this_event = int(event['start'])
         end_of_this_event = int(event['end'])
@@ -99,18 +75,12 @@ class CalendarParser:
       if not now_event and self.event_is_happening_now(cur_time, start_of_this_event, end_of_this_event):
         now_event = event
       time_till_start_of_this_event = start_of_this_event - cur_time
-      # print "now: ", cur_time
-      # print "time till start: ", time_till_start
-      # print "next_event_start: ", next_event_start
-      # print "--------------------------------------"
       if time_till_start_of_this_event < time_till_next_event and time_till_start_of_this_event > 0:
         next_event = event
     return (now_event, next_event)
 
   def event_is_happening_now(self, now, event_start, event_end):
-    if now > event_start and now < event_end:
-      return True
-    return False
+    return now > event_start and now < event_end
 
   def find_next_occurrence_of(self, event, cur_time):
     if event['recurrence'].has_key('until'):
@@ -146,51 +116,60 @@ class CalendarParser:
     end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
     return "Event: \"%s\", from %s - %s" % (subject, start_time_str, end_time_str)
 
+  def find_next_batch_index(self, events):
+    if events['metadata']['links'].has_key('next'):
+      url = events['metadata']['links']['next'][0]['href']
+      match = re.search(r'start=(\d+)', url)
+      if match:
+        return int(match.group(1)) or -1
+    return -1
+
+  def parse_calendar_for_user(self, user):
+    event_index = 0
+    current_meeting = None
+    next_meeting = None
+    logging.info("Fetching records for %s" % user)
+    while event_index >= 0:
+      (event_batch, next_event_index) = self.get_event_batch(user, event_index)
+      logging.debug("Processing records %d - %d" % (event_index + 1, event_index + len(event_batch)))
+      (cur_batch_now, cur_batch_next) = self.find_next_events_in_batch(event_batch)
+      current_meeting = current_meeting or cur_batch_now
+      next_meeting = next_meeting or cur_batch_next
+      if cur_batch_next and int(cur_batch_next['start']) < int(next_meeting['start']):
+        next_meeting = cur_batch_next
+      event_index = next_event_index
+    return (current_meeting, next_meeting)
+
+  def write_meeting_info(self, user, current_event, next_event):
+    self.record_info("Room: %s" % user)
+    if current_event:
+      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
+    else:
+      self.record_info("Current meeting: AVAILABLE")
+    if next_event:
+      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
+    else:
+      self.record_info("No Future meetings")
+    self.record_info("----------------------")
+
   def record_info(self, string):
     self.fd.write('%s\n' % string)
 
-  def find_next_batch_index(self, events):
-    import re
-    events = json.loads(events)
-    if not events['metadata']['links'].has_key('next'):
-      return -1
-    url = events['metadata']['links']['next'][0]['href']
-    match = re.search(r'start=(\d+)', url)
-    if match:
-      return int(match.group(1)) or -1
-    else:
-      return -1
+  #TODO: Only for debugging; delete when finished
+  def get_and_print_event(self, username, event_id):
+    username = username + self.domain
 
-  def parse_events(self):
-    for user in self.usernames:
-      event_index = 0
-      current_event = None
-      following_event = None
-      logging.info("Fetching records for %s" % user)
-      while event_index >= 0:
-        logging.debug("Fetching records %d - %d" % (event_index + 1, event_index + 50))
-        events = self.get_event_batch(user, event_index)
-        (happening_now, happening_next) = self.get_next_event(events)
-        if happening_now:
-          current_event = happening_now
-        if happening_next and not following_event:
-          following_event = happening_next
-        elif happening_next and int(happening_next['start']) < int(following_event['start']):
-          following_event = happening_next
-        event_index = self.find_next_batch_index(events)
+    uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
+    print 'fetching: ', uri
 
-      self.record_info("Room: %s" % user)
-      if current_event:
-        self.record_info("Current meeting: %s" % self.display_event(current_event, user))
-      else:
-        self.record_info("Current meeting: AVAILABLE")
-      if following_event:
-        self.record_info("Next meeting: %s" % self.display_event(following_event, user))
-      else:
-        self.record_info("No Future meetings")
-      self.record_info("----------------------")
-    self.close_file()
+    req = urllib2.Request(uri)
+    req.add_header('Accept', 'application/json')
 
+    ret = urllib2.urlopen(req).read()
+    output = json.loads(ret)
+    print json.dumps(output, sort_keys=True, indent=4)
+    return output
+  
 
 def parse_args():
   parser = argparse.ArgumentParser(description='Fetch calendar events')
@@ -201,7 +180,10 @@ def parse_args():
 def main():
   args = parse_args()
   cal = CalendarParser(args.config)
-  cal.parse_events()
+  for user in cal.usernames:
+    (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
+    cal.write_meeting_info(user, current_meeting, next_meeting)
+  cal.cleanup()
 
 # print json.dumps(output, sort_keys=True, indent=4)
 
