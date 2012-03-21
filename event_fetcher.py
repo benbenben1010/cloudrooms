@@ -1,5 +1,6 @@
 #!/usr/bin/python2
 
+#{{{ imports
 import argparse
 import ConfigParser
 import logging
@@ -10,8 +11,11 @@ import string
 import sys
 import time
 import urllib2
+#}}}
 
+#{{{ class CalendarParser
 class CalendarParser:
+  #{{{ __init__(self, config_file)
   def __init__(self, config_file):
     config = ConfigParser.ConfigParser()
     config.read(config_file)
@@ -26,15 +30,21 @@ class CalendarParser:
     self.fd = open(self.outfile, 'w')
 
     self.setup_logging(config.get('DEFAULT', 'logfile'))
+  #}}}
 
+  #{{{ setup_logging(self, logfile)
   def setup_logging(self, logfile):
     logging.basicConfig(filename=logfile, level=logging.DEBUG, 
         format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
     self.logger = logging.getLogger("CalendarParser")
+  #}}}
 
+  #{{{ cleanup(self)
   def cleanup(self):
     self.fd.close()
+  #}}}
 
+  #{{{ get_event_batch(self, username, start_index)
   def get_event_batch(self, username, start_index):
     username = username + self.domain
     auth = urllib2.HTTPDigestAuthHandler()
@@ -54,10 +64,14 @@ class CalendarParser:
     event_batch = json.loads(data)['events']
     event_index = self.find_next_batch_index(json.loads(data))
     return (event_batch, event_index)
+  #}}}
 
+  #{{{ get_current_time(self)
   def get_current_time(self):
     return int(time.time())
+  #}}}
   
+  #{{{ find_next_events_in_batch(self, events)
   def find_next_events_in_batch(self, events):
     cur_time = self.get_current_time()
     time_till_next_event = sys.maxint
@@ -78,10 +92,14 @@ class CalendarParser:
       if time_till_start_of_this_event < time_till_next_event and time_till_start_of_this_event > 0:
         next_event = event
     return (now_event, next_event)
+  #}}}
 
+  #{{{ event_is_happening_now(self, now, event_start, event_end)
   def event_is_happening_now(self, now, event_start, event_end):
     return now > event_start and now < event_end
+  #}}}
 
+  #{{{ find_next_occurrence_of(self, event, cur_time)
   def find_next_occurrence_of(self, event, cur_time):
     if event['recurrence'].has_key('until'):
       until_time = event['recurrence']['until']
@@ -104,7 +122,38 @@ class CalendarParser:
         total_count -= 1
       return event
     return event
+  #}}}
   
+  #{{{ find_next_batch_index(self, events)
+  def find_next_batch_index(self, events):
+    if events['metadata']['links'].has_key('next'):
+      url = events['metadata']['links']['next'][0]['href']
+      match = re.search(r'start=(\d+)', url)
+      if match:
+        return int(match.group(1)) or -1
+    return -1
+  #}}}
+
+  #{{{ write_meeting_info(self, user, current_event, next_event)
+  def write_meeting_info(self, user, current_event, next_event):
+    self.record_info("Room: %s" % user)
+    if current_event:
+      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
+    else:
+      self.record_info("Current meeting: AVAILABLE")
+    if next_event:
+      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
+    else:
+      self.record_info("No Future meetings")
+    self.record_info("----------------------")
+  #}}}
+
+  #{{{ record_info(self, string)
+  def record_info(self, string):
+    self.fd.write('%s\n' % string)
+  #}}}
+
+  #{{{ display_event(self, event, user)
   def display_event(self, event, user):
     subject = event['subject']
     start_secs = event['start']
@@ -115,15 +164,9 @@ class CalendarParser:
     end_time = time.localtime(end_secs)
     end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
     return "Event: \"%s\", from %s - %s" % (subject, start_time_str, end_time_str)
+  #}}}
 
-  def find_next_batch_index(self, events):
-    if events['metadata']['links'].has_key('next'):
-      url = events['metadata']['links']['next'][0]['href']
-      match = re.search(r'start=(\d+)', url)
-      if match:
-        return int(match.group(1)) or -1
-    return -1
-
+  #{{{ parse_calendar_for_user(self, user)
   def parse_calendar_for_user(self, user):
     event_index = 0
     current_meeting = None
@@ -139,22 +182,9 @@ class CalendarParser:
         next_meeting = cur_batch_next
       event_index = next_event_index
     return (current_meeting, next_meeting)
+  #}}}
 
-  def write_meeting_info(self, user, current_event, next_event):
-    self.record_info("Room: %s" % user)
-    if current_event:
-      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
-    else:
-      self.record_info("Current meeting: AVAILABLE")
-    if next_event:
-      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
-    else:
-      self.record_info("No Future meetings")
-    self.record_info("----------------------")
-
-  def record_info(self, string):
-    self.fd.write('%s\n' % string)
-
+  #{{{ get_and_print_event(self, username, event_id)
   #TODO: Only for debugging; delete when finished
   def get_and_print_event(self, username, event_id):
     username = username + self.domain
@@ -169,14 +199,19 @@ class CalendarParser:
     output = json.loads(ret)
     print json.dumps(output, sort_keys=True, indent=4)
     return output
+  #}}}
+#}}}
   
 
+#{{{ parse_args()
 def parse_args():
   parser = argparse.ArgumentParser(description='Fetch calendar events')
   parser.add_argument('-c', '--config', dest='config', required=True, 
                       default='test.ini', help='Config file to use')
   return parser.parse_args()
+#}}}
 
+#{{{ main()
 def main():
   args = parse_args()
   cal = CalendarParser(args.config)
@@ -184,6 +219,7 @@ def main():
     (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
     cal.write_meeting_info(user, current_meeting, next_meeting)
   cal.cleanup()
+#}}}
 
 # print json.dumps(output, sort_keys=True, indent=4)
 
