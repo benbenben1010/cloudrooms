@@ -44,6 +44,33 @@ class CalendarParser:
     self.fd.close()
   #}}}
 
+  #{{{ get_and_print_event(self, username, event_id)
+  #TODO: Only for debugging; delete when finished
+  def get_and_print_event(self, username, event_id):
+    username = username + self.domain
+
+    uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
+    print 'fetching: ', uri
+
+    req = urllib2.Request(uri)
+    req.add_header('Accept', 'application/json')
+
+    ret = urllib2.urlopen(req).read()
+    output = json.loads(ret)
+    print json.dumps(output, sort_keys=True, indent=4)
+    return output
+  #}}}
+
+  #{{{ find_next_batch_index(self, events)
+  def find_next_batch_index(self, events):
+    if events['metadata']['links'].has_key('next'):
+      url = events['metadata']['links']['next'][0]['href']
+      match = re.search(r'start=(\d+)', url)
+      if match:
+        return int(match.group(1)) or -1
+    return -1
+  #}}}
+
   #{{{ get_event_batch(self, username, start_index)
   def get_event_batch(self, username, start_index):
     username = username + self.domain
@@ -71,34 +98,6 @@ class CalendarParser:
     return int(time.time())
   #}}}
   
-  #{{{ find_next_events_in_batch(self, events)
-  def find_next_events_in_batch(self, events):
-    cur_time = self.get_current_time()
-    time_till_next_event = sys.maxint
-    now_event = None
-    next_event = None
-  
-    for event in events:
-      if event['recurrence']:
-        event = self.find_next_occurrence_of(event, cur_time)
-      try:
-        start_of_this_event = int(event['start'])
-        end_of_this_event = int(event['end'])
-      except ValueError, e:
-        continue 
-      if not now_event and self.event_is_happening_now(cur_time, start_of_this_event, end_of_this_event):
-        now_event = event
-      time_till_start_of_this_event = start_of_this_event - cur_time
-      if time_till_start_of_this_event < time_till_next_event and time_till_start_of_this_event > 0:
-        next_event = event
-    return (now_event, next_event)
-  #}}}
-
-  #{{{ event_is_happening_now(self, now, event_start, event_end)
-  def event_is_happening_now(self, now, event_start, event_end):
-    return now > event_start and now < event_end
-  #}}}
-
   #{{{ find_next_occurrence_of(self, event, cur_time)
   def find_next_occurrence_of(self, event, cur_time):
     if event['recurrence'].has_key('until'):
@@ -124,46 +123,32 @@ class CalendarParser:
     return event
   #}}}
   
-  #{{{ find_next_batch_index(self, events)
-  def find_next_batch_index(self, events):
-    if events['metadata']['links'].has_key('next'):
-      url = events['metadata']['links']['next'][0]['href']
-      match = re.search(r'start=(\d+)', url)
-      if match:
-        return int(match.group(1)) or -1
-    return -1
+  #{{{ event_is_happening_now(self, now, event_start, event_end)
+  def event_is_happening_now(self, now, event_start, event_end):
+    return now > event_start and now < event_end
   #}}}
 
-  #{{{ write_meeting_info(self, user, current_event, next_event)
-  def write_meeting_info(self, user, current_event, next_event):
-    self.record_info("Room: %s" % user)
-    if current_event:
-      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
-    else:
-      self.record_info("Current meeting: AVAILABLE")
-    if next_event:
-      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
-    else:
-      self.record_info("No Future meetings")
-    self.record_info("----------------------")
-  #}}}
-
-  #{{{ record_info(self, string)
-  def record_info(self, string):
-    self.fd.write('%s\n' % string)
-  #}}}
-
-  #{{{ display_event(self, event, user)
-  def display_event(self, event, user):
-    subject = event['subject']
-    start_secs = event['start']
-    start_time = time.localtime(start_secs)
-    start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
+  #{{{ find_next_events_in_batch(self, events)
+  def find_next_events_in_batch(self, events):
+    cur_time = self.get_current_time()
+    time_till_next_event = sys.maxint
+    now_event = None
+    next_event = None
   
-    end_secs = event['end']
-    end_time = time.localtime(end_secs)
-    end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
-    return "Event: \"%s\", from %s - %s" % (subject, start_time_str, end_time_str)
+    for event in events:
+      if event['recurrence']:
+        event = self.find_next_occurrence_of(event, cur_time)
+      try:
+        start_of_this_event = int(event['start'])
+        end_of_this_event = int(event['end'])
+      except ValueError, e:
+        continue 
+      if not now_event and self.event_is_happening_now(cur_time, start_of_this_event, end_of_this_event):
+        now_event = event
+      time_till_start_of_this_event = start_of_this_event - cur_time
+      if time_till_start_of_this_event < time_till_next_event and time_till_start_of_this_event > 0:
+        next_event = event
+    return (now_event, next_event)
   #}}}
 
   #{{{ parse_calendar_for_user(self, user)
@@ -184,22 +169,38 @@ class CalendarParser:
     return (current_meeting, next_meeting)
   #}}}
 
-  #{{{ get_and_print_event(self, username, event_id)
-  #TODO: Only for debugging; delete when finished
-  def get_and_print_event(self, username, event_id):
-    username = username + self.domain
-
-    uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
-    print 'fetching: ', uri
-
-    req = urllib2.Request(uri)
-    req.add_header('Accept', 'application/json')
-
-    ret = urllib2.urlopen(req).read()
-    output = json.loads(ret)
-    print json.dumps(output, sort_keys=True, indent=4)
-    return output
+  #{{{ display_event(self, event, user)
+  def display_event(self, event, user):
+    subject = event['subject']
+    start_secs = event['start']
+    start_time = time.localtime(start_secs)
+    start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
+  
+    end_secs = event['end']
+    end_time = time.localtime(end_secs)
+    end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
+    return "Event: \"%s\", from %s - %s" % (subject, start_time_str, end_time_str)
   #}}}
+
+  #{{{ record_info(self, string)
+  def record_info(self, string):
+    self.fd.write('%s\n' % string)
+  #}}}
+
+  #{{{ write_meeting_info(self, user, current_event, next_event)
+  def write_meeting_info(self, user, current_event, next_event):
+    self.record_info("Room: %s" % user)
+    if current_event:
+      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
+    else:
+      self.record_info("Current meeting: AVAILABLE")
+    if next_event:
+      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
+    else:
+      self.record_info("No Future meetings")
+    self.record_info("----------------------")
+  #}}}
+
 #}}}
   
 
