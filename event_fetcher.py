@@ -92,10 +92,9 @@ class CalendarParser:
     event_index = self.find_next_batch_index(json.loads(data))
     return (event_batch, event_index)
   #}}}
-  
-  #TODO fetch paged occurrences list
-  #{{{ def get_occurrence_list_for_event(self, username, event_id)
-  def get_occurrence_list_for_event(self, username, event_id):
+
+  #{{{ def get_occurrence_list_for_event(self, username, event_id, start_index)
+  def get_occurrence_list_for_event(self, username, event_id, start_index):
     username = username + self.domain
     auth = urllib2.HTTPDigestAuthHandler()
     auth.add_password(realm=self.realm,
@@ -105,19 +104,18 @@ class CalendarParser:
     opener = urllib2.build_opener(auth)
     urllib2.install_opener(opener)
 
-    uri = "%s%s/events/%s/occurrences" % (self.uri_base, username, event_id)
+    uri = "%s%s/events/%s/occurrences?start=%s&limit=50" % (self.uri_base, username, event_id, start_index)
     req = urllib2.Request(uri)
     req.add_header('Accept', 'application/json')
     data = urllib2.urlopen(req).read()
-    json_data = json.loads(data)
-    print json.dumps(json_data['metadata'], sort_keys=True, indent=2)
-    return json.loads(data)['occurrences']
+    occurrence_batch = json.loads(data)['occurrences']
+    occurrence_index = self.find_next_batch_index(json.loads(data))
+    return (occurrence_batch, occurrence_index)
   #}}}
   
-  #TODO: iterate through occurrences list and find next event
-  #{{{ find_next_occurrence_of(self, event, cur_time)
-  def find_next_occurrence_of(self, event, cur_time):
-    #{{{ debug logging
+  #{{{ def log_debug_data_about_event(self, event, cur_time):  TESTING_ONLY
+  def log_debug_data_about_event(self, event, cur_time):
+    logging.debug("******************************************************")
     logging.debug("Event Name: %s" % json.dumps(event['subject']))
     logging.debug("Event ID = %s" % json.dumps(event['metadata']['links']['via'][0]['href'], sort_keys=True, indent=2))
     logging.debug("Occurrence = %s" % json.dumps(event['occurrences'], sort_keys=True, indent=2))
@@ -125,58 +123,39 @@ class CalendarParser:
     now_time = time.localtime(cur_time)
     now_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", now_time)
     logging.debug( "      Now: %d, %s" % (cur_time, now_time_str))
+  #}}}
+
+  #{{{ def log_debug_data_about_event_start_end(self, event)  TESTING_ONLY
+  def log_debug_data_about_event_start_end(self, event, new=False):
+    if new:
+      new_str = "New"
+    else:
+      new_str = "Old"
     start_secs = event['start']
     start_time = time.localtime(start_secs)
     start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
     end_secs = event['end']
     end_time = time.localtime(end_secs)
     end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
-    logging.debug( "Old Start: %d; %s       Old End: %d; %s" % (start_secs, start_time_str, end_secs, end_time_str))
-    #}}}
+    logging.debug("%s Start: %d; %s       %s End: %d; %s" % (new_str, start_secs, start_time_str, new_str, end_secs, end_time_str))
+  #}}}
+  
+  #{{{ find_next_occurrence_of(self, event, cur_time)
+  def find_next_occurrence_of(self, event, cur_time):
+    #self.log_debug_data_about_event(event, cur_time)
+    #self.log_debug_data_about_event_start_end(event, new=False)
 
     event_uri = event['metadata']['links']['via'][0]['href']
-    username = re.search(r'user/(\w+)@', event_uri).group(1)
+    username = re.search(r'user/([\w,\-]+)@', event_uri).group(1)
     event_id = re.search(r'events/(\d+)', event_uri).group(1)
-    occurrence_list = self.get_occurrence_list_for_event(username, event_id)
-    i = 1
-    for occurrence in occurrence_list:
-      # print "--------------------------------------------------"
-      # print "Occurrence # %d" % i
-      # print json.dumps(occurrence, sort_keys=True, indent=2)
-      i += 1
-    return event
-
-    #{{{ old recurrence code
-    if event['recurrence'].has_key('until'):
-      until_time = event['recurrence']['until']
-      total_count = 99999999
-    elif event['recurrence'].has_key('count'):
-      until_time = 9999999999
-      total_count = int(event['recurrence']['count'])
-    else:
-      until_time = 9999999999
-      total_count = 9999999
-
-    event_start = time.localtime(event['start'])
-    event_end = time.localtime(event['end'])
-
-    if event['recurrence']['type'] == 'weekly':
-      interval = int(event['recurrence']['interval'])
-      while event['start'] < cur_time and event['start'] < until_time and total_count > 0:
-        event['start'] += (60 * 60 * 24 * 7 * interval)
-        event['end'] += (60 * 60 * 24 * 7 * interval)
-        total_count -= 1
-    #}}}
-    #{{{ debug logging
-    start_secs = event['start']
-    start_time = time.localtime(start_secs)
-    start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
-    end_secs = event['end']
-    end_time = time.localtime(end_secs)
-    end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
-    logging.debug("New Start: %d; %s       New End: %d; %s" % (start_secs, start_time_str, end_secs, end_time_str))
-    logging.debug("******************************************************")
-    #}}}
+    occurrence_index = 0
+    while occurrence_index >= 0:
+      (occurrence_batch, occurrence_index) = self.get_occurrence_list_for_event(username, event_id, occurrence_index)
+      for occurrence in occurrence_batch:
+        if int(occurrence['start']) > cur_time:
+          #self.log_debug_data_about_event_start_end(occurrence, new=True)
+          return occurrence
+    #logging.debug("This event doesn't happen after now")
     return event
   #}}}
   
@@ -195,11 +174,14 @@ class CalendarParser:
         this_event_end = int(event['end'])
       except ValueError, e:
         continue 
+
       if now > this_event_start and now < this_event_end:
         current_meeting = event
       secs_until_start_of_this_event = this_event_start - now
+
       if secs_until_start_of_this_event < secs_until_next_meeting and secs_until_start_of_this_event > 0:
         next_meeting = event
+        secs_until_next_meeting = secs_until_start_of_this_event
     return (current_meeting, next_meeting)
   #}}}
 
