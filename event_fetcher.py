@@ -44,23 +44,6 @@ class CalendarParser:
     self.fd.close()
   #}}}
 
-  #{{{ get_and_print_event(self, username, event_id)  TESTING_ONLY
-  #TODO: Only for debugging; delete when finished
-  def get_and_print_event(self, username, event_id):
-    username = username + self.domain
-
-    uri = '%s%s/events/%s' % (self.uri_base, username, event_id)
-    print 'fetching: ', uri
-
-    req = urllib2.Request(uri)
-    req.add_header('Accept', 'application/json')
-
-    ret = urllib2.urlopen(req).read()
-    output = json.loads(ret)
-    print json.dumps(output, sort_keys=True, indent=4)
-    return output
-  #}}}
-
   #{{{ find_next_batch_index(self, events)
   def find_next_batch_index(self, events):
     if events['metadata']['links'].has_key('next'):
@@ -113,38 +96,8 @@ class CalendarParser:
     return (occurrence_batch, occurrence_index)
   #}}}
   
-  #{{{ def log_debug_data_about_event(self, event, cur_time):  TESTING_ONLY
-  def log_debug_data_about_event(self, event, cur_time):
-    logging.debug("******************************************************")
-    logging.debug("Event Name: %s" % json.dumps(event['subject']))
-    logging.debug("Event ID = %s" % json.dumps(event['metadata']['links']['via'][0]['href'], sort_keys=True, indent=2))
-    logging.debug("Occurrence = %s" % json.dumps(event['occurrences'], sort_keys=True, indent=2))
-    logging.debug("Recurrence = %s" % json.dumps(event['recurrence'], sort_keys=True, indent=2))
-    now_time = time.localtime(cur_time)
-    now_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", now_time)
-    logging.debug( "      Now: %d, %s" % (cur_time, now_time_str))
-  #}}}
-
-  #{{{ def log_debug_data_about_event_start_end(self, event)  TESTING_ONLY
-  def log_debug_data_about_event_start_end(self, event, new=False):
-    if new:
-      new_str = "New"
-    else:
-      new_str = "Old"
-    start_secs = event['start']
-    start_time = time.localtime(start_secs)
-    start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
-    end_secs = event['end']
-    end_time = time.localtime(end_secs)
-    end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
-    logging.debug("%s Start: %d; %s       %s End: %d; %s" % (new_str, start_secs, start_time_str, new_str, end_secs, end_time_str))
-  #}}}
-  
   #{{{ find_next_occurrence_of(self, event, cur_time)
   def find_next_occurrence_of(self, event, cur_time):
-    #self.log_debug_data_about_event(event, cur_time)
-    #self.log_debug_data_about_event_start_end(event, new=False)
-
     event_uri = event['metadata']['links']['via'][0]['href']
     username = re.search(r'user/([\w,\-]+)@', event_uri).group(1)
     event_id = re.search(r'events/(\d+)', event_uri).group(1)
@@ -153,9 +106,7 @@ class CalendarParser:
       (occurrence_batch, occurrence_index) = self.get_occurrence_list_for_event(username, event_id, occurrence_index)
       for occurrence in occurrence_batch:
         if int(occurrence['start']) > cur_time:
-          #self.log_debug_data_about_event_start_end(occurrence, new=True)
           return occurrence
-    #logging.debug("This event doesn't happen after now")
     return event
   #}}}
   
@@ -208,12 +159,12 @@ class CalendarParser:
     subject = event['subject']
     start_secs = event['start']
     start_time = time.localtime(start_secs)
-    start_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", start_time)
+    start_time_str = time.strftime("%a, %m/%d/%Y  %I:%M%p", start_time)
   
     end_secs = event['end']
     end_time = time.localtime(end_secs)
-    end_time_str = time.strftime("%a, %d %b %Y %I:%M:%S %p", end_time)
-    return "Event: \"%s\", from %s - %s" % (subject, start_time_str, end_time_str)
+    end_time_str = time.strftime("%I:%M%p", end_time)
+    return "\"%s\": %s - %s" % (subject, start_time_str, end_time_str)
   #}}}
 
   #{{{ record_info(self, string)
@@ -255,8 +206,6 @@ def main():
     cal.write_meeting_info(user, current_meeting, next_meeting)
   cal.cleanup()
 #}}}
-
-# print json.dumps(output, sort_keys=True, indent=4)
 
 if __name__ == '__main__':
   main()
