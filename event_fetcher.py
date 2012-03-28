@@ -1,7 +1,6 @@
-#!/usr/bin/python2
+#!/usr/bin/env python2
 
 #{{{ imports
-import argparse
 import ConfigParser
 import logging
 import os
@@ -11,6 +10,7 @@ import string
 import sys
 import time
 import urllib2
+from optparse import OptionParser
 #}}}
 
 #{{{ class CalendarParser
@@ -191,16 +191,19 @@ class CalendarParser:
 
 #{{{ parse_args()
 def parse_args():
-  parser = argparse.ArgumentParser(description='Fetch calendar events')
-  parser.add_argument('-c', '--config', dest='config', required=True, 
-                      default='test.ini', help='Config file to use')
+  parser = OptionParser()
+  parser.add_option('-c', '--config', dest='config', default=None, 
+                    help='Config file to user')
   return parser.parse_args()
 #}}}
 
 #{{{ main()
 def main():
-  args = parse_args()
-  cal = CalendarParser(args.config)
+  (options, args) = parse_args()
+  if not options.config:
+    print "Input a config file!"
+    return
+  cal = CalendarParser(options.config)
   for user in cal.usernames:
     (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
     cal.write_meeting_info(user, current_meeting, next_meeting)
