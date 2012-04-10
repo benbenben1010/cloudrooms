@@ -24,10 +24,16 @@ class CalendarParser:
     self.usernames = config.get('DEFAULT', 'usernames').split(',')
     self.domain = config.get('DEFAULT', 'domain')
     self.realm = config.get('DEFAULT', 'realm')
-    self.outfile = config.get('DEFAULT', 'outfile')
-    if os.path.exists(self.outfile):
-      os.remove(self.outfile)
-    self.fd = open(self.outfile, 'w')
+    self.text_outfile = config.get('DEFAULT', 'text_outfile')
+    self.json_outfile = config.get('DEFAULT', 'json_outfile')
+
+    if os.path.exists(self.text_outfile):
+      os.remove(self.text_outfile)
+    self.text_fd = open(self.text_outfile, 'w')
+
+    if os.path.exists(self.json_outfile):
+      os.remove(self.json_outfile)
+    self.json_fd = open(self.json_outfile, 'w')
 
     self.setup_logging(config.get('DEFAULT', 'logfile'))
   #}}}
@@ -41,7 +47,8 @@ class CalendarParser:
 
   #{{{ cleanup(self)
   def cleanup(self):
-    self.fd.close()
+    self.text_fd.close()
+    self.json_fd.close
   #}}}
 
   #{{{ find_next_batch_index(self, events)
@@ -169,7 +176,7 @@ class CalendarParser:
 
   #{{{ record_info(self, string)
   def record_info(self, string):
-    self.fd.write('%s\n' % string)
+    self.text_fd.write('%s\n' % string)
   #}}}
 
   #{{{ write_meeting_info(self, user, current_event, next_event)
@@ -185,6 +192,47 @@ class CalendarParser:
       self.record_info("No Future meetings")
     self.record_info("----------------------")
   #}}}
+
+  #{{{ append_user_info(self, user, current_event, next_event):
+  def append_user_info(self, output, user, current_event, next_event):
+    user_to_add = {}
+    user_to_add['Username'] = user
+
+    cur = {}
+    if current_event:
+      cur['status'] = 'Occupied'
+      cur['subject'] = current_event['subject']
+      cur['start'] = current_event['start']
+      cur['end'] = current_event['end']
+      cur['event_id'] = current_event['metadata']['id']
+      cur['url'] = current_event['metadata']['links']['via'][0]['href']
+    else:
+      cur['status'] = 'AVAILABLE'
+    
+    next = {}
+    if next_event:
+      next['status'] = 'Occupied'
+      next['subject'] = next_event['subject']
+      next['start'] = next_event['start']
+      next['end'] = next_event['end']
+      next['event_id'] = next_event['metadata']['id']
+
+      next['url'] = next_event['metadata']['links']['via'][0]['href']
+    else:
+      next['status'] = 'AVAILABLE'
+
+    user_to_add['Current Meeting'] = cur
+    user_to_add['Next Meeting'] = next
+
+    output['users'].append(user_to_add)
+    return output
+  #}}}
+
+  #{{{ write_json_to_file(self, file, output):
+  def write_json_to_file(self, file, output):
+    self.json_fd.write(json.dumps(output))
+  #}}}
+
 
 #}}}
   
@@ -204,9 +252,12 @@ def main():
     print "Input a config file!"
     return
   cal = CalendarParser(options.config)
+  output = {"users":[]}
   for user in cal.usernames:
     (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
     cal.write_meeting_info(user, current_meeting, next_meeting)
+    output = cal.append_user_info(output, user, current_meeting, next_meeting)
+  cal.write_json_to_file(file, output)
   cal.cleanup()
 #}}}
 
