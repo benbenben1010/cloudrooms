@@ -193,36 +193,26 @@ class CalendarParser:
     self.record_info("----------------------")
   #}}}
 
+  #{{{ create_event_dict(self, event):
+  def create_event_dict(self, event):
+    event_dict = {}
+    if event:
+      event_dict['status'] = 'Occupied'
+      event_dict['subject'] = event['subject']
+      event_dict['start'] = event['start']
+      event_dict['end'] = event['end']
+      event_dict['event_id'] = event['metadata']['id']
+      event_dict['url'] = event['metadata']['links']['via'][0]['href']
+    else:
+      event_dict['status'] = 'AVAILABLE'
+    return event_dict
+  #}}}
+
   #{{{ append_user_info(self, user, current_event, next_event):
   def append_user_info(self, output, user, current_event, next_event):
-    user_to_add = {}
-    user_to_add['Username'] = user
-
-    cur = {}
-    if current_event:
-      cur['status'] = 'Occupied'
-      cur['subject'] = current_event['subject']
-      cur['start'] = current_event['start']
-      cur['end'] = current_event['end']
-      cur['event_id'] = current_event['metadata']['id']
-      cur['url'] = current_event['metadata']['links']['via'][0]['href']
-    else:
-      cur['status'] = 'AVAILABLE'
-    
-    next = {}
-    if next_event:
-      next['status'] = 'Occupied'
-      next['subject'] = next_event['subject']
-      next['start'] = next_event['start']
-      next['end'] = next_event['end']
-      next['event_id'] = next_event['metadata']['id']
-
-      next['url'] = next_event['metadata']['links']['via'][0]['href']
-    else:
-      next['status'] = 'AVAILABLE'
-
-    user_to_add['Current Meeting'] = cur
-    user_to_add['Next Meeting'] = next
+    user_to_add = {'Username': user}
+    user_to_add['Current Meeting'] = self.create_event_dict(current_event)
+    user_to_add['Next Meeting'] = self.create_event_dict(next_event)
 
     output['users'].append(user_to_add)
     return output
