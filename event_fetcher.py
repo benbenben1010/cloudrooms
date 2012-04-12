@@ -31,10 +31,6 @@ class CalendarParser:
       os.remove(self.text_outfile)
     self.text_fd = open(self.text_outfile, 'w')
 
-    if os.path.exists(self.json_outfile):
-      os.remove(self.json_outfile)
-    self.json_fd = open(self.json_outfile, 'w')
-
     self.setup_logging(config.get('DEFAULT', 'logfile'))
   #}}}
 
@@ -48,7 +44,6 @@ class CalendarParser:
   #{{{ cleanup(self)
   def cleanup(self):
     self.text_fd.close()
-    self.json_fd.close
   #}}}
 
   #{{{ find_next_batch_index(self, events)
@@ -112,7 +107,7 @@ class CalendarParser:
     while occurrence_index >= 0:
       (occurrence_batch, occurrence_index) = self.get_occurrence_list_for_event(username, event_id, occurrence_index)
       for occurrence in occurrence_batch:
-        if int(occurrence['start']) > cur_time:
+        if int(occurrence['end']) > cur_time:
           return occurrence
     return event
   #}}}
@@ -185,7 +180,7 @@ class CalendarParser:
     if current_event:
       self.record_info("Current meeting: %s" % self.display_event(current_event, user))
     else:
-      self.record_info("Current meeting: AVAILABLE")
+      self.record_info("Current meeting: Available")
     if next_event:
       self.record_info("Next meeting: %s" % self.display_event(next_event, user))
     else:
@@ -204,23 +199,27 @@ class CalendarParser:
       event_dict['event_id'] = event['metadata']['id']
       event_dict['url'] = event['metadata']['links']['via'][0]['href']
     else:
-      event_dict['status'] = 'AVAILABLE'
+      event_dict['status'] = 'Available'
     return event_dict
   #}}}
 
   #{{{ append_user_info(self, user, current_event, next_event):
   def append_user_info(self, output, user, current_event, next_event):
-    user_to_add = {'Username': user}
-    user_to_add['Current Meeting'] = self.create_event_dict(current_event)
-    user_to_add['Next Meeting'] = self.create_event_dict(next_event)
+    user_to_add = {'name': user}
+    user_to_add['current_meeting'] = self.create_event_dict(current_event)
+    user_to_add['next_meeting'] = self.create_event_dict(next_event)
 
-    output['users'].append(user_to_add)
+    output['rooms'].append(user_to_add)
     return output
   #}}}
 
   #{{{ write_json_to_file(self, file, output):
   def write_json_to_file(self, file, output):
+    if os.path.exists(self.json_outfile):
+      os.remove(self.json_outfile)
+    self.json_fd = open(self.json_outfile, 'w')
     self.json_fd.write(json.dumps(output))
+    self.json_fd.close()
   #}}}
 
 
@@ -242,7 +241,7 @@ def main():
     print "Input a config file!"
     return
   cal = CalendarParser(options.config)
-  output = {"users":[]}
+  output = {"rooms":[]}
   for user in cal.usernames:
     (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
     cal.write_meeting_info(user, current_meeting, next_meeting)
