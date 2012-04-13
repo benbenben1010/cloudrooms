@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import simplejson as json
-import string
 import sys
 import time
 import urllib2
@@ -15,6 +14,7 @@ from optparse import OptionParser
 
 #{{{ class CalendarParser
 class CalendarParser:
+
   #{{{ __init__(self, config_file)
   def __init__(self, config_file):
     config = ConfigParser.ConfigParser()
@@ -24,13 +24,7 @@ class CalendarParser:
     self.usernames = config.get('DEFAULT', 'usernames').split(',')
     self.domain = config.get('DEFAULT', 'domain')
     self.realm = config.get('DEFAULT', 'realm')
-    self.text_outfile = config.get('DEFAULT', 'text_outfile')
     self.json_outfile = config.get('DEFAULT', 'json_outfile')
-
-    if os.path.exists(self.text_outfile):
-      os.remove(self.text_outfile)
-    self.text_fd = open(self.text_outfile, 'w')
-
     self.setup_logging(config.get('DEFAULT', 'logfile'))
   #}}}
 
@@ -39,11 +33,6 @@ class CalendarParser:
     logging.basicConfig(filename=logfile, level=logging.DEBUG, 
         format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
     self.logger = logging.getLogger("CalendarParser")
-  #}}}
-
-  #{{{ cleanup(self)
-  def cleanup(self):
-    self.text_fd.close()
   #}}}
 
   #{{{ find_next_batch_index(self, events)
@@ -156,38 +145,6 @@ class CalendarParser:
     return (current_meeting, next_meeting)
   #}}}
 
-  #{{{ display_event(self, event, user)
-  def display_event(self, event, user):
-    subject = event['subject']
-    start_secs = event['start']
-    start_time = time.localtime(start_secs)
-    start_time_str = time.strftime("%a, %m/%d/%Y  %I:%M%p", start_time)
-  
-    end_secs = event['end']
-    end_time = time.localtime(end_secs)
-    end_time_str = time.strftime("%I:%M%p", end_time)
-    return "\"%s\": %s - %s" % (subject, start_time_str, end_time_str)
-  #}}}
-
-  #{{{ record_info(self, string)
-  def record_info(self, string):
-    self.text_fd.write('%s\n' % string)
-  #}}}
-
-  #{{{ write_meeting_info(self, user, current_event, next_event)
-  def write_meeting_info(self, user, current_event, next_event):
-    self.record_info("Room: %s" % user)
-    if current_event:
-      self.record_info("Current meeting: %s" % self.display_event(current_event, user))
-    else:
-      self.record_info("Current meeting: Available")
-    if next_event:
-      self.record_info("Next meeting: %s" % self.display_event(next_event, user))
-    else:
-      self.record_info("No Future meetings")
-    self.record_info("----------------------")
-  #}}}
-
   #{{{ create_event_dict(self, event):
   def create_event_dict(self, event):
     event_dict = {}
@@ -222,6 +179,14 @@ class CalendarParser:
     self.json_fd.close()
   #}}}
 
+  #{{{ parse_all_users_and_write_to_file(self)
+  def parse_all_users_and_write_to_file(self):
+    output = {"rooms":[]}
+    for user in self.usernames:
+      (current_meeting, next_meeting) = self.parse_calendar_for_user(user)
+      output = self.append_user_info(output, user, current_meeting, next_meeting)
+    self.write_json_to_file(file, output)
+  #}}}
 
 #}}}
   
@@ -240,14 +205,9 @@ def main():
   if not options.config:
     print "Input a config file!"
     return
+
   cal = CalendarParser(options.config)
-  output = {"rooms":[]}
-  for user in cal.usernames:
-    (current_meeting, next_meeting) = cal.parse_calendar_for_user(user)
-    cal.write_meeting_info(user, current_meeting, next_meeting)
-    output = cal.append_user_info(output, user, current_meeting, next_meeting)
-  cal.write_json_to_file(file, output)
-  cal.cleanup()
+  cal.parse_all_users_and_write_to_file()
 #}}}
 
 if __name__ == '__main__':
